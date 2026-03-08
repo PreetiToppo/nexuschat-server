@@ -13,21 +13,19 @@ import java.time.Instant;
 @AllArgsConstructor
 public class ChatMessage {
 
-    private String id;              // message ID from MongoDB
-    private String channelId;       // which channel
-    private String senderId;        // who sent it
-    private String senderUsername;  // display name
-    private String content;         // message text
+    private String id;
+    private String channelId;
+    private String senderId;
+    private String senderUsername;
+    private String content;
     private Message.MessageType type;
-    private Instant createdAt;      // timestamp
-
-    // For typing indicators
+    private Instant createdAt;
     private EventType eventType;
 
     public enum EventType {
-        MESSAGE,   // normal chat message
-        TYPING,    // user is typing...
-        JOIN,      // user joined channel
-        LEAVE      // user left channel
+        MESSAGE,
+        TYPING,
+        JOIN,
+        LEAVE
     }
 }
