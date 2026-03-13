@@ -18,23 +18,18 @@ public class PresenceService {
     private final RedisTemplate<String, Object> redisTemplate;
     private final SimpMessagingTemplate messagingTemplate;
 
-    private static final int PRESENCE_TTL_SECONDS = 30;
-    private static final String PRESENCE_KEY = "presence:";
-    private static final String CHANNEL_USERS_KEY = "channel:users:";
+    private static final int    PRESENCE_TTL_SECONDS = 30;
+    private static final String PRESENCE_KEY         = "presence:";
 
     // Called when user connects via WebSocket
     public void userOnline(String userId, String username) {
-        // SET presence:{userId} = username  EX 30
         redisTemplate.opsForValue().set(
                 PRESENCE_KEY + userId,
                 username,
                 PRESENCE_TTL_SECONDS,
                 TimeUnit.SECONDS
         );
-
         log.info("🟢 {} ({}) is ONLINE", username, userId);
-
-        // Broadcast presence event to everyone
         broadcastPresence(userId, username, "ONLINE");
     }
 
@@ -42,7 +37,6 @@ public class PresenceService {
     public void heartbeat(String userId) {
         Boolean exists = redisTemplate.hasKey(PRESENCE_KEY + userId);
         if (Boolean.TRUE.equals(exists)) {
-            // Reset TTL to 30s — user is still active
             redisTemplate.expire(
                     PRESENCE_KEY + userId,
                     PRESENCE_TTL_SECONDS,
@@ -66,37 +60,46 @@ public class PresenceService {
         );
     }
 
-    // Add user to a channel's active user set
-    public void joinChannel(String channelId, String userId) {
-        redisTemplate.opsForSet().add(
-                CHANNEL_USERS_KEY + channelId, userId
-        );
-        redisTemplate.expire(
-                CHANNEL_USERS_KEY + channelId, 1, TimeUnit.HOURS
-        );
+    // ── Get ALL online users globally ──────────────────────────────────────
+    public Map<String, String> getAllOnlineUsers() {
+        Set<String> keys = redisTemplate.keys(PRESENCE_KEY + "*");
+        Map<String, String> onlineUsers = new HashMap<>();
+
+        if (keys == null || keys.isEmpty()) return onlineUsers;
+
+        for (String key : keys) {
+            String userId   = key.replace(PRESENCE_KEY, "");
+            Object username = redisTemplate.opsForValue().get(key);
+
+            if (username == null) continue;
+
+            String uname = username.toString();
+
+            // ── Skip corrupted entries ─────────────────────────────────
+            if (uname.isBlank()) continue;
+            if (uname.equalsIgnoreCase("ONLINE"))  continue;
+            if (uname.equalsIgnoreCase("OFFLINE")) continue;
+            if (userId.equalsIgnoreCase("online"))  continue;
+            if (userId.equalsIgnoreCase("offline")) continue;
+
+            onlineUsers.put(userId, uname);
+        }
+        return onlineUsers;
     }
 
-    // Remove user from channel
-    public void leaveChannel(String channelId, String userId) {
-        redisTemplate.opsForSet().remove(
-                CHANNEL_USERS_KEY + channelId, userId
-        );
-    }
-
-    // Get all online users in a channel
+    // ── Get online users in a specific channel (kept for future use) ───────
     public Map<String, String> getOnlineUsersInChannel(String channelId) {
         Set<Object> userIds = redisTemplate.opsForSet()
-                .members(CHANNEL_USERS_KEY + channelId);
+                .members("channel:users:" + channelId);
 
         Map<String, String> onlineUsers = new HashMap<>();
         if (userIds == null) return onlineUsers;
 
         for (Object userIdObj : userIds) {
-            String userId = userIdObj.toString();
+            String userId   = userIdObj.toString();
             Object username = redisTemplate.opsForValue()
                     .get(PRESENCE_KEY + userId);
             if (username != null) {
-                // User has presence key = they are online
                 onlineUsers.put(userId, username.toString());
             }
         }
@@ -107,11 +110,9 @@ public class PresenceService {
     private void broadcastPresence(
             String userId, String username, String status) {
         Map<String, String> event = new HashMap<>();
-        event.put("userId", userId);
+        event.put("userId",   userId);
         event.put("username", username);
-        event.put("status", status);
-
-        // All clients subscribed to /topic/presence get this
+        event.put("status",   status);
         messagingTemplate.convertAndSend("/topic/presence", event);
     }
 }
