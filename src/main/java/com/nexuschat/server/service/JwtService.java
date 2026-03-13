@@ -3,6 +3,7 @@ package com.nexuschat.server.service;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import javax.crypto.SecretKey;
 import java.util.Date;
@@ -11,15 +12,17 @@ import java.util.Base64;
 @Service
 public class JwtService {
 
-    // Secret key - in production this goes in environment variables
-    private static final String SECRET = "nexuschat-super-secret-key-minimum-256-bits-long!!";
-    private static final long ACCESS_TOKEN_EXPIRY = 15 * 60 * 1000;        // 15 minutes
-    private static final long REFRESH_TOKEN_EXPIRY = 7 * 24 * 60 * 60 * 1000; // 7 days
+    @Value("${jwt.secret}")
+    private String secret;
+
+    private static final long ACCESS_TOKEN_EXPIRY = 15 * 60 * 1000;
+    private static final long REFRESH_TOKEN_EXPIRY = 7 * 24 * 60 * 60 * 1000;
 
     private SecretKey getSigningKey() {
-        byte[] keyBytes = Base64.getEncoder().encode(SECRET.getBytes());
+        byte[] keyBytes = Base64.getEncoder().encode(secret.getBytes()); // ✅ lowercase secret
         return Keys.hmacShaKeyFor(keyBytes);
     }
+
 
     public String generateAccessToken(String userId, String email) {
         return Jwts.builder()
