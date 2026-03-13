@@ -4,6 +4,7 @@ import com.nexuschat.server.model.User;
 import com.nexuschat.server.repository.UserRepository;
 import com.nexuschat.server.service.JwtService;
 import com.nexuschat.server.service.RateLimiterService;
+import com.nexuschat.server.service.RateLimiterService.RateLimitResult;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -16,21 +17,23 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class AuthController {
 
-    private final UserRepository userRepository;
-    private final JwtService jwtService;
+    private final UserRepository        userRepository;
+    private final JwtService            jwtService;
     private final BCryptPasswordEncoder passwordEncoder;
-    private final RateLimiterService rateLimiterService;
+    private final RateLimiterService    rateLimiterService;
 
     @PostMapping("/register")
     public ResponseEntity<?> register(
             @RequestBody Map<String, String> request,
             HttpServletRequest httpRequest) {
 
-        // Rate limit by IP
         String ip = getClientIp(httpRequest);
-        if (!rateLimiterService.isAllowed("register:" + ip)) {
+
+        // ── Rate limit — IP only for register ─────────────────────────
+        if (!rateLimiterService.checkRegisterRateLimit(ip)) {
             return ResponseEntity.status(429)
-                    .body(Map.of("error", "Too many attempts. Please try again later."));
+                    .body(Map.of("error",
+                            "Too many registration attempts. Try again in 15 minutes."));
         }
 
         String username = request.get("username");
@@ -51,7 +54,8 @@ public class AuthController {
         }
         if (!username.matches("^[a-zA-Z0-9_]+$")) {
             return ResponseEntity.badRequest()
-                    .body(Map.of("error", "Username can only contain letters, numbers, and underscores"));
+                    .body(Map.of("error",
+                            "Username can only contain letters, numbers, and underscores"));
         }
 
         // ── Email validation ───────────────────────────────────────────
@@ -68,11 +72,13 @@ public class AuthController {
         }
         if (!password.matches(".*[A-Z].*")) {
             return ResponseEntity.badRequest()
-                    .body(Map.of("error", "Password must contain at least one uppercase letter"));
+                    .body(Map.of("error",
+                            "Password must contain at least one uppercase letter"));
         }
         if (!password.matches(".*[0-9].*")) {
             return ResponseEntity.badRequest()
-                    .body(Map.of("error", "Password must contain at least one number"));
+                    .body(Map.of("error",
+                            "Password must contain at least one number"));
         }
 
         // ── Uniqueness checks ──────────────────────────────────────────
@@ -93,8 +99,7 @@ public class AuthController {
                 .build();
         User saved = userRepository.save(user);
 
-        // Reset rate limit on success
-        rateLimiterService.resetLimit("register:" + ip);
+        rateLimiterService.resetRegisterRateLimit(ip);
 
         String accessToken  = jwtService.generateAccessToken(saved.getId(), saved.getEmail());
         String refreshToken = jwtService.generateRefreshToken(saved.getId());
@@ -112,28 +117,29 @@ public class AuthController {
             @RequestBody Map<String, String> request,
             HttpServletRequest httpRequest) {
 
-        // Rate limit by IP
-        String ip = getClientIp(httpRequest);
-        if (!rateLimiterService.isAllowed("login:" + ip)) {
-            int remaining = rateLimiterService.getRemainingAttempts("login:" + ip);
+        String ip    = getClientIp(httpRequest);
+        String email = request.get("email") != null
+                ? request.get("email").trim().toLowerCase()
+                : "unknown";
+
+        // ── Rate limit — all 3 layers ──────────────────────────────────
+        RateLimitResult rateLimit = rateLimiterService.checkLoginRateLimit(ip, email);
+        if (!rateLimit.allowed) {
             return ResponseEntity.status(429).body(Map.of(
-                    "error", "Too many login attempts. Please try again in 15 minutes.",
-                    "remainingAttempts", remaining
+                    "error",             rateLimit.message,
+                    "remainingAttempts", rateLimit.remainingAttempts
             ));
         }
 
-        String email    = request.get("email");
-        String password = request.get("password");
-
-        if (email == null || password == null) {
+        if (email.equals("unknown") || request.get("password") == null) {
             return ResponseEntity.badRequest()
                     .body(Map.of("error", "Email and password are required"));
         }
 
-        User user = userRepository.findByEmail(email.trim().toLowerCase()).orElse(null);
+        String password = request.get("password");
+        User   user     = userRepository.findByEmail(email).orElse(null);
 
-        // Use constant-time comparison to prevent timing attacks
-        // Always run passwordEncoder.matches even if user is null
+        // ── Constant-time comparison ───────────────────────────────────
         String hashToCheck = (user != null)
                 ? user.getPasswordHash()
                 : "$2a$10$dummyhashtopreventtimingattack00000000000000000000000000";
@@ -144,12 +150,15 @@ public class AuthController {
             return ResponseEntity.badRequest()
                     .body(Map.of(
                             "error", "Invalid email or password",
-                            "remainingAttempts", rateLimiterService.getRemainingAttempts("login:" + ip)
+                            "remainingAttempts",
+                            rateLimiterService.getRemainingAttempts(
+                                    "login:ip+email:" + ip + ":" + email,
+                                    5)
                     ));
         }
 
-        // Reset rate limit on successful login
-        rateLimiterService.resetLimit("login:" + ip);
+        // ── Reset all 3 counters on success ────────────────────────────
+        rateLimiterService.resetLoginRateLimit(ip, email);
 
         String accessToken  = jwtService.generateAccessToken(user.getId(), user.getEmail());
         String refreshToken = jwtService.generateRefreshToken(user.getId());
@@ -163,7 +172,6 @@ public class AuthController {
     }
 
     // ── Helper ─────────────────────────────────────────────────────────────
-    // Handles proxies / load balancers (X-Forwarded-For)
     private String getClientIp(HttpServletRequest request) {
         String forwarded = request.getHeader("X-Forwarded-For");
         if (forwarded != null && !forwarded.isBlank()) {
