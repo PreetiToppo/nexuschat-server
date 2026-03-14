@@ -1,6 +1,9 @@
 [build]
 builder = "NIXPACKS"
 
+[build.nixpacksPlan.phases.setup]
+nixPkgs = ["jdk21", "maven"]
+
 [deploy]
 startCommand = "java -Dserver.port=$PORT -jar target/*.jar"
 restartPolicyType = "ON_FAILURE"
