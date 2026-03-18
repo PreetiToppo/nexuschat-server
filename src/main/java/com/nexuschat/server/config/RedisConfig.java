@@ -4,15 +4,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.nexuschat.server.service.RedisMessageSubscriber;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.context.annotation.Primary;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
-import org.springframework.data.redis.connection.RedisPassword;
-import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
-import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.listener.PatternTopic;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
@@ -20,43 +16,11 @@ import org.springframework.data.redis.listener.adapter.MessageListenerAdapter;
 import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
-import java.net.URI;
-
 @Configuration
 public class RedisConfig {
 
-    // Reads REDIS_PUBLIC_URL first, then REDIS_URL, then falls back to localhost
-    @Value("${REDIS_PUBLIC_URL:${REDIS_URL:redis://localhost:6379}}")
-    private String redisUrl;
-
-    @Bean
-    public RedisConnectionFactory redisConnectionFactory() {
-        try {
-            URI uri = URI.create(redisUrl);
-            String host = uri.getHost();
-            int port = uri.getPort() > 0 ? uri.getPort() : 6379;
-
-            RedisStandaloneConfiguration config =
-                    new RedisStandaloneConfiguration(host, port);
-
-            // Extract password from userinfo (format: user:password or :password)
-            String userInfo = uri.getUserInfo();
-            if (userInfo != null && !userInfo.isBlank()) {
-                String password = userInfo.contains(":")
-                        ? userInfo.substring(userInfo.indexOf(':') + 1)
-                        : userInfo;
-                if (!password.isBlank()) {
-                    config.setPassword(RedisPassword.of(password));
-                }
-            }
-
-            return new LettuceConnectionFactory(config);
-        } catch (Exception e) {
-            // Fallback to localhost if URL parsing fails
-            return new LettuceConnectionFactory(
-                    new RedisStandaloneConfiguration("localhost", 6379));
-        }
-    }
+    // No custom redisConnectionFactory bean here.
+    // Spring Boot auto-configures Redis from SPRING_DATA_REDIS_* env vars.
 
     @Bean
     @Primary
@@ -68,9 +32,10 @@ public class RedisConfig {
     }
 
     @Bean
-    public RedisTemplate<String, Object> redisTemplate() {
+    public RedisTemplate<String, Object> redisTemplate(
+            RedisConnectionFactory factory) {
         RedisTemplate<String, Object> template = new RedisTemplate<>();
-        template.setConnectionFactory(redisConnectionFactory());
+        template.setConnectionFactory(factory);
         template.setKeySerializer(new StringRedisSerializer());
         template.setHashKeySerializer(new StringRedisSerializer());
         template.setValueSerializer(
@@ -94,10 +59,11 @@ public class RedisConfig {
 
     @Bean
     public RedisMessageListenerContainer redisMessageListenerContainer(
+            RedisConnectionFactory factory,
             @Lazy MessageListenerAdapter messageListenerAdapter) {
         RedisMessageListenerContainer container =
                 new RedisMessageListenerContainer();
-        container.setConnectionFactory(redisConnectionFactory());
+        container.setConnectionFactory(factory);
         container.addMessageListener(
                 messageListenerAdapter,
                 new PatternTopic("chat:*")
