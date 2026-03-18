@@ -10,6 +10,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.context.annotation.Primary;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.connection.RedisPassword;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -19,29 +20,42 @@ import org.springframework.data.redis.listener.adapter.MessageListenerAdapter;
 import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
+import java.net.URI;
+
 @Configuration
 public class RedisConfig {
 
-    @Value("${spring.data.redis.host:localhost}")
-    private String redisHost;
-
-    @Value("${spring.data.redis.port:6379}")
-    private int redisPort;
-
-    // Set REDIS_PASSWORD in your environment or application.properties
-    // e.g. spring.data.redis.password=your-redis-password
-    // Leave blank for local dev with no auth
-    @Value("${spring.data.redis.password:}")
-    private String redisPassword;
+    // Reads REDIS_PUBLIC_URL first, then REDIS_URL, then falls back to localhost
+    @Value("${REDIS_PUBLIC_URL:${REDIS_URL:redis://localhost:6379}}")
+    private String redisUrl;
 
     @Bean
     public RedisConnectionFactory redisConnectionFactory() {
-        RedisStandaloneConfiguration config =
-                new RedisStandaloneConfiguration(redisHost, redisPort);
-        if (redisPassword != null && !redisPassword.isBlank()) {
-            config.setPassword(redisPassword);
+        try {
+            URI uri = URI.create(redisUrl);
+            String host = uri.getHost();
+            int port = uri.getPort() > 0 ? uri.getPort() : 6379;
+
+            RedisStandaloneConfiguration config =
+                    new RedisStandaloneConfiguration(host, port);
+
+            // Extract password from userinfo (format: user:password or :password)
+            String userInfo = uri.getUserInfo();
+            if (userInfo != null && !userInfo.isBlank()) {
+                String password = userInfo.contains(":")
+                        ? userInfo.substring(userInfo.indexOf(':') + 1)
+                        : userInfo;
+                if (!password.isBlank()) {
+                    config.setPassword(RedisPassword.of(password));
+                }
+            }
+
+            return new LettuceConnectionFactory(config);
+        } catch (Exception e) {
+            // Fallback to localhost if URL parsing fails
+            return new LettuceConnectionFactory(
+                    new RedisStandaloneConfiguration("localhost", 6379));
         }
-        return new LettuceConnectionFactory(config);
     }
 
     @Bean
