@@ -1,0 +1,34 @@
+# ── Server ─────────────────────────────────────────────────────────────────
+server.port=8080
+
+# ── App ────────────────────────────────────────────────────────────────────
+spring.application.name=nexuschat-server
+
+# ── MongoDB ────────────────────────────────────────────────────────────────
+spring.data.mongodb.uri=mongodb://localhost:27017/nexuschat
+
+# ── Redis ──────────────────────────────────────────────────────────────────
+spring.data.redis.host=localhost
+spring.data.redis.port=6379
+spring.data.redis.password=${REDIS_PASSWORD:}
+spring.data.redis.client-type=lettuce
+spring.data.redis.lettuce.pool.max-active=10
+spring.data.redis.lettuce.pool.max-idle=5
+spring.data.redis.lettuce.pool.min-idle=1
+spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.data.redis.RedisReactiveAutoConfiguration
+
+# ── JWT ────────────────────────────────────────────────────────────────────
+jwt.secret=${JWT_SECRET:your-secret-here}
+
+# ── CORS ───────────────────────────────────────────────────────────────────
+cors.allowed-origins=${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+
+# ── WebSocket ──────────────────────────────────────────────────────────────
+spring.websocket.server.path=/ws
+
+# ── SSE ────────────────────────────────────────────────────────────────────
+spring.mvc.async.request-timeout=30000
+
+# ── Groq AI ────────────────────────────────────────────────────────────────
+ai.groq.api-key=${AI_GROQ_API_KEY:your-groq-api-key-here}
+ai.groq.model=llama-3.1-8b-instant
